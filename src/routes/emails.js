@@ -56,12 +56,23 @@ router.post('/', async (req, res) => {
 // GET /api/emails — protected: list all emails (admin)
 router.get('/', protect, async (req, res) => {
     try {
-        const { page = 1, limit = 20, status, search, sort = '-createdAt' } = req.query;
+        const { page = 1, limit = 20, status, search, sort = '-createdAt', startDate, endDate } = req.query;
 
         const query = {};
         if (status && status !== 'all') query.status = status;
         if (search) {
             query.email = { $regex: search, $options: 'i' };
+        }
+
+        // Date range filtering
+        if (startDate || endDate) {
+            query.createdAt = {};
+            if (startDate) query.createdAt.$gte = new Date(startDate);
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                query.createdAt.$lte = end;
+            }
         }
 
         const skip = (Number(page) - 1) * Number(limit);
@@ -71,11 +82,12 @@ router.get('/', protect, async (req, res) => {
             Email.countDocuments(query),
         ]);
 
-        // Stats
-        const [totalEmails, newEmails, contactedEmails] = await Promise.all([
-            Email.countDocuments(),
-            Email.countDocuments({ status: 'new' }),
-            Email.countDocuments({ status: 'contacted' }),
+        // Stats calculation based on provided filters (except pagination)
+        const [totalCount, newCount, contactedCount, archivedCount] = await Promise.all([
+            Email.countDocuments(query),
+            Email.countDocuments({ ...query, status: 'new' }),
+            Email.countDocuments({ ...query, status: 'contacted' }),
+            Email.countDocuments({ ...query, status: 'archived' }),
         ]);
 
         res.json({
@@ -88,10 +100,10 @@ router.get('/', protect, async (req, res) => {
                 pages: Math.ceil(total / Number(limit)),
             },
             stats: {
-                total: totalEmails,
-                new: newEmails,
-                contacted: contactedEmails,
-                archived: totalEmails - newEmails - contactedEmails,
+                total: totalCount,
+                new: newCount,
+                contacted: contactedCount,
+                archived: archivedCount,
             },
         });
     } catch (error) {
@@ -100,6 +112,50 @@ router.get('/', protect, async (req, res) => {
             status: 'error',
             message: 'Server error.',
         });
+    }
+});
+
+// GET /api/emails/export — protected: export emails as CSV
+router.get('/export', protect, async (req, res) => {
+    try {
+        const { status, search, startDate, endDate } = req.query;
+        const query = {};
+        if (status && status !== 'all') query.status = status;
+        if (search) query.email = { $regex: search, $options: 'i' };
+
+        if (startDate || endDate) {
+            query.createdAt = {};
+            if (startDate) query.createdAt.$gte = new Date(startDate);
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                query.createdAt.$lte = end;
+            }
+        }
+
+        const emails = await Email.find(query).sort('-createdAt');
+
+        // Simple CSV generation
+        const headers = ['ID', 'Email', 'Source', 'Status', 'Date'];
+        const rows = emails.map(e => [
+            e._id,
+            e.email,
+            e.source,
+            e.status,
+            e.createdAt.toISOString()
+        ]);
+
+        const csvContent = [
+            headers.join(','),
+            ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+        ].join('\n');
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=emails-export-${new Date().toISOString().split('T')[0]}.csv`);
+        res.status(200).send(csvContent);
+    } catch (error) {
+        console.error('Export emails error:', error);
+        res.status(500).json({ status: 'error', message: 'Export failed' });
     }
 });
 

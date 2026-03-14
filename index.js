@@ -9,6 +9,7 @@ import authRoutes from './src/routes/auth.js';
 import emailRoutes from './src/routes/emails.js';
 import visitorRoutes from './src/routes/visitors.js';
 import donateRoutes from './src/routes/donate.js';
+import statsRoutes from './src/routes/stats.js';
 import { checkBlocked, publicLimiter, authLimiter, adminLimiter } from './src/middleware/rateLimiter.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -41,6 +42,7 @@ app.use('/api/auth', authLimiter, authRoutes);           // Auth: 10 req/min (lo
 app.use('/api/emails', publicLimiter, emailRoutes);      // Public submissions + admin CRUD
 app.use('/api/visitors', publicLimiter, visitorRoutes);  // Visitor tracking + admin views
 app.use('/api/donate', publicLimiter, donateRoutes);     // Donation / support system
+app.use('/api/stats', adminLimiter, statsRoutes);        // Admin stats & trends
 
 // Health check
 app.get('/api/health', (req, res) => {

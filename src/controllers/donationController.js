@@ -20,9 +20,7 @@ export const createOrder = async (req, res) => {
     });
 };
 
-// ──────────────────────────────────────────────
 // POST /api/donate/verify
-// ──────────────────────────────────────────────
 export const verifyPayment = async (req, res) => {
     const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = req.body;
 
@@ -48,9 +46,7 @@ export const verifyPayment = async (req, res) => {
     });
 };
 
-// ──────────────────────────────────────────────
 // GET /api/donate/total
-// ──────────────────────────────────────────────
 export const getTotal = async (_req, res) => {
     const stats = await donationService.getTotalDonations();
 
@@ -60,9 +56,8 @@ export const getTotal = async (_req, res) => {
     });
 };
 
-// ──────────────────────────────────────────────
+
 // GET /api/donate/recent
-// ──────────────────────────────────────────────
 export const getRecent = async (_req, res) => {
     const supporters = await donationService.getRecentSupporters(5);
 

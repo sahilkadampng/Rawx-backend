@@ -94,7 +94,7 @@ router.post('/track', async (req, res) => {
 // GET /api/visitors — protected: list visitors
 router.get('/', protect, async (req, res) => {
     try {
-        const { page = 1, limit = 20, search } = req.query;
+        const { page = 1, limit = 20, search, startDate, endDate } = req.query;
         const query = {};
         if (search) {
             query.$or = [
@@ -104,6 +104,17 @@ router.get('/', protect, async (req, res) => {
             ];
         }
 
+        // Date range filtering
+        if (startDate || endDate) {
+            query.createdAt = {};
+            if (startDate) query.createdAt.$gte = new Date(startDate);
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                query.createdAt.$lte = end;
+            }
+        }
+
         const skip = (Number(page) - 1) * Number(limit);
 
         const [visitors, total] = await Promise.all([
@@ -111,12 +122,13 @@ router.get('/', protect, async (req, res) => {
             Visitor.countDocuments(query),
         ]);
 
-        // Stats
-        const totalVisitors = await Visitor.countDocuments();
-        const uniqueIPs = await Visitor.distinct('ip');
+        // Stats (respecting date query for 'today' and totals if needed, but keeping global unique count)
+        const totalVisitors = await Visitor.countDocuments(query);
+        const uniqueIPs = await Visitor.distinct('ip', query);
+
         const todayStart = new Date();
         todayStart.setHours(0, 0, 0, 0);
-        const todayVisitors = await Visitor.countDocuments({ createdAt: { $gte: todayStart } });
+        const todayVisitors = await Visitor.countDocuments({ ...query, createdAt: { $gte: todayStart } });
 
         res.json({
             status: 'success',
@@ -136,6 +148,58 @@ router.get('/', protect, async (req, res) => {
     } catch (err) {
         console.error('Fetch visitors error:', err);
         res.status(500).json({ status: 'error', message: 'Server error' });
+    }
+});
+
+// GET /api/visitors/export — protected: export visitors as CSV
+router.get('/export', protect, async (req, res) => {
+    try {
+        const { search, startDate, endDate } = req.query;
+        const query = {};
+        if (search) {
+            query.$or = [
+                { ip: { $regex: search, $options: 'i' } },
+                { device: { $regex: search, $options: 'i' } },
+                { browser: { $regex: search, $options: 'i' } },
+            ];
+        }
+
+        if (startDate || endDate) {
+            query.createdAt = {};
+            if (startDate) query.createdAt.$gte = new Date(startDate);
+            if (endDate) {
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                query.createdAt.$lte = end;
+            }
+        }
+
+        const visitors = await Visitor.find(query).sort('-createdAt');
+
+        const headers = ['ID', 'IP', 'Country', 'City', 'Device', 'Browser', 'OS', 'Page', 'Date'];
+        const rows = visitors.map(v => [
+            v._id,
+            v.ip,
+            v.country,
+            v.city,
+            v.device,
+            v.browser,
+            v.os,
+            v.page,
+            v.createdAt.toISOString()
+        ]);
+
+        const csvContent = [
+            headers.join(','),
+            ...rows.map(row => row.map(cell => `"${cell || 'N/A'}"`).join(','))
+        ].join('\n');
+
+        res.setHeader('Content-Type', 'text/csv');
+        res.setHeader('Content-Disposition', `attachment; filename=visitors-export-${new Date().toISOString().split('T')[0]}.csv`);
+        res.status(200).send(csvContent);
+    } catch (err) {
+        console.error('Export visitors error:', err);
+        res.status(500).json({ status: 'error', message: 'Export failed' });
     }
 });
 
